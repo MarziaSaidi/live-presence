@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState("");
   const [users, setUsers] = useState<any[]>([]);
+  const [isNew, setIsNew] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -25,6 +26,14 @@ export default function Dashboard() {
 
       setEmail(user.email || "");
       setUserId(user.id);
+
+      // Check if user was created recently (within last 60 seconds = new user)
+      const createdAt = new Date(user.created_at);
+      const now = new Date();
+      const diffInSeconds = (now.getTime() - createdAt.getTime()) / 1000;
+      const isNewUser = diffInSeconds < 60;
+
+      setIsNew(isNewUser);
     };
 
     getUser();
@@ -54,7 +63,7 @@ export default function Dashboard() {
     <div style={{ padding: "40px", fontFamily: "sans-serif" }}>
       <h1>Dashboard 🟢</h1>
       <p>
-        Welcome back, <strong>{email}</strong>!
+        {isNew ? "Welcome" : "Welcome back"}, <strong>{email}</strong>!
       </p>
 
       <h2>Who's Online</h2>
