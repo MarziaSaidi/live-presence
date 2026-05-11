@@ -10,6 +10,8 @@ export default function Dashboard() {
   const [userId, setUserId] = useState("");
   const [users, setUsers] = useState<any[]>([]);
   const [isNew, setIsNew] = useState(false);
+  const [message, setMessage] = useState("");
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const router = useRouter();
   const supabase = createClient();
 
@@ -41,7 +43,7 @@ export default function Dashboard() {
 
   useHeartbeat(userId);
 
-  // Fetch all users and their presence
+  // Fetch all users and their presence with REALTIME
   useEffect(() => {
     const fetchUsers = async () => {
       const { data } = await supabase
@@ -52,12 +54,68 @@ export default function Dashboard() {
       setUsers(data || []);
     };
 
+    // Initial fetch
     fetchUsers();
 
-    // Refresh every 5 seconds
-    const interval = setInterval(fetchUsers, 5000);
-    return () => clearInterval(interval);
+    // Subscribe to realtime changes
+    const channel = supabase
+      .channel("presence-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "presence",
+        },
+        () => {
+          // Refetch when anything changes
+          fetchUsers();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
+
+  // Typing indicator broadcast
+  useEffect(() => {
+    if (!userId || !email) return;
+
+    const channel = supabase.channel("typing-indicator");
+    const typingTimers: Record<string, NodeJS.Timeout> = {};
+
+    // Listen for others typing
+    channel.on("broadcast", { event: "typing" }, ({ payload }) => {
+      if (payload.userId === userId) return; // Ignore yourself
+
+      // Add to typing users
+      setTypingUsers((prev) => {
+        if (!prev.includes(payload.username)) {
+          return [...prev, payload.username];
+        }
+        return prev;
+      });
+
+      // Clear existing timer for this user
+      if (typingTimers[payload.username]) {
+        clearTimeout(typingTimers[payload.username]);
+      }
+
+      // Remove after 3 seconds of no new typing signals
+      typingTimers[payload.username] = setTimeout(() => {
+        setTypingUsers((prev) => prev.filter((u) => u !== payload.username));
+      }, 60000);
+    });
+
+    channel.subscribe();
+
+    return () => {
+      Object.values(typingTimers).forEach(clearTimeout);
+      supabase.removeChannel(channel);
+    };
+  }, [userId, email]);
 
   return (
     <div style={{ padding: "40px", fontFamily: "sans-serif" }}>
@@ -87,7 +145,11 @@ export default function Dashboard() {
                 height: "12px",
                 borderRadius: "50%",
                 backgroundColor:
-                  user.status === "online" ? "#22c55e" : "#6b7280",
+                  user.status === "online"
+                    ? "#22c55e"
+                    : user.status === "idle"
+                      ? "#eab308"
+                      : "#6b7280",
               }}
             />
             <span>{user.profiles?.username || "Unknown"}</span>
@@ -97,6 +159,38 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      <h2 style={{ marginTop: "40px" }}>Chat</h2>
+
+      {typingUsers.length > 0 && (
+        <p style={{ fontSize: "14px", color: "#6b7280", fontStyle: "italic" }}>
+          {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"}{" "}
+          typing...
+        </p>
+      )}
+
+      <input
+        type="text"
+        value={message}
+        onChange={(e) => {
+          setMessage(e.target.value);
+
+          // Broadcast typing
+          supabase.channel("typing-indicator").send({
+            type: "broadcast",
+            event: "typing",
+            payload: { userId, username: email },
+          });
+        }}
+        placeholder="Type a message..."
+        style={{
+          width: "100%",
+          padding: "12px",
+          fontSize: "16px",
+          borderRadius: "8px",
+          border: "1px solid #ccc",
+        }}
+      />
     </div>
   );
 }

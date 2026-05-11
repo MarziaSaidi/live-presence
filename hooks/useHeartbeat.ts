@@ -20,14 +20,39 @@ export function useHeartbeat(userId: string) {
     // Set to online immediately
     updateStatus("online");
 
-    // Keep sending "I'm still here" every 30 seconds
-    const interval = setInterval(() => {
+    // Heartbeat every 30 seconds
+    const heartbeatInterval = setInterval(() => {
       updateStatus("online");
     }, 30000);
 
-    // When user closes the tab, mark as offline
+    // Idle detection
+    let idleTimer: NodeJS.Timeout;
+
+    const resetIdle = () => {
+      clearTimeout(idleTimer);
+      updateStatus("online");
+
+      // If no activity for 60 seconds, mark as idle
+      idleTimer = setTimeout(() => {
+        updateStatus("idle");
+      }, 60000);
+    };
+
+    // Listen for activity
+    window.addEventListener("mousemove", resetIdle);
+    window.addEventListener("keydown", resetIdle);
+    window.addEventListener("click", resetIdle);
+
+    // Start the idle timer
+    resetIdle();
+
+    // Cleanup
     return () => {
-      clearInterval(interval);
+      clearInterval(heartbeatInterval);
+      clearTimeout(idleTimer);
+      window.removeEventListener("mousemove", resetIdle);
+      window.removeEventListener("keydown", resetIdle);
+      window.removeEventListener("click", resetIdle);
       updateStatus("offline");
     };
   }, [userId]);
